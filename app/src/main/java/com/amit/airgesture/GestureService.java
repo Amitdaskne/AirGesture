@@ -7,11 +7,14 @@ import android.content.Context;
 import android.content.Intent;
 import android.graphics.PixelFormat;
 import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.WindowManager;
+import android.widget.TextView;
 import androidx.annotation.NonNull;
 import androidx.camera.core.CameraSelector;
 import androidx.camera.core.ImageAnalysis;
@@ -38,10 +41,10 @@ public class GestureService extends LifecycleService {
     private WindowManager windowManager;
     private View overlayView;
     private PreviewView previewView;
-    private android.widget.TextView overlayStatus;
+    private TextView overlayStatus;
     
     private long lastActionTime = 0;
-    private static final long COOLDOWN_MS = 1500; // 1.5 sec cooldown
+    private static final long COOLDOWN_MS = 1500; 
 
     @Override
     public void onCreate() {
@@ -49,10 +52,8 @@ public class GestureService extends LifecycleService {
         createNotificationChannel();
         startForeground(1, buildNotification());
 
-        // Setup Floating Camera Window
         setupFloatingWindow();
 
-        // Setup MediaPipe Gesture Recognizer
         BaseOptions baseOptions = BaseOptions.builder().setModelAssetPath("gesture_recognizer.task").build();
         GestureRecognizer.GestureRecognizerOptions options = GestureRecognizer.GestureRecognizerOptions.builder()
                 .setBaseOptions(baseOptions)
@@ -87,8 +88,8 @@ public class GestureService extends LifecycleService {
                 PixelFormat.TRANSLUCENT
         );
         params.gravity = Gravity.TOP | Gravity.START;
-        params.x = 20; // Margin from left
-        params.y = 100; // Margin from top
+        params.x = 20; 
+        params.y = 100; 
 
         windowManager.addView(overlayView, params);
     }
@@ -126,17 +127,17 @@ public class GestureService extends LifecycleService {
     }
 
     private void onGestureResult(GestureRecognizerResult result, MPImage input) {
-        runOnUiThread(() -> {
+        // 🔥 FIX: Service me UI update ke liye Handler use kiya 🔥
+        new Handler(Looper.getMainLooper()).post(() -> {
             if (result.gestures().isEmpty()) {
                 overlayStatus.setText("Show Hand");
                 return;
             }
 
-            // Get the top recognized gesture
             String gestureName = result.gestures().get(0).get(0).categoryName();
             long currentTime = System.currentTimeMillis();
 
-            if (currentTime - lastActionTime < COOLDOWN_MS) return; // Prevent spamming
+            if (currentTime - lastActionTime < COOLDOWN_MS) return; 
 
             SwipeAccessibilityService service = SwipeAccessibilityService.getInstance();
             if (service == null) {
