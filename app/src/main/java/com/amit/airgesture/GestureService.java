@@ -3,39 +3,45 @@ package com.amit.airgesture;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
+import android.content.Context;
 import android.content.Intent;
+import android.graphics.PixelFormat;
 import android.os.Build;
 import android.os.IBinder;
+import android.view.Gravity;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.view.WindowManager;
 import androidx.annotation.NonNull;
 import androidx.camera.core.CameraSelector;
 import androidx.camera.core.ImageAnalysis;
+import androidx.camera.core.Preview;
 import androidx.camera.lifecycle.ProcessCameraProvider;
+import androidx.camera.view.PreviewView;
 import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
 import androidx.lifecycle.LifecycleService;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.mediapipe.framework.image.BitmapImageBuilder;
 import com.google.mediapipe.framework.image.MPImage;
-import com.google.mediapipe.tasks.components.containers.NormalizedLandmark;
 import com.google.mediapipe.tasks.core.BaseOptions;
 import com.google.mediapipe.tasks.vision.core.RunningMode;
-import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker;
-import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarkerResult;
-import java.util.List;
+import com.google.mediapipe.tasks.vision.gesturerecognizer.GestureRecognizer;
+import com.google.mediapipe.tasks.vision.gesturerecognizer.GestureRecognizerResult;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class GestureService extends LifecycleService {
 
-    private HandLandmarker handLandmarker;
+    private GestureRecognizer gestureRecognizer;
     private ExecutorService cameraExecutor;
-    public static final String ACTION_STATUS = "com.amit.airgesture.STATUS";
+    private WindowManager windowManager;
+    private View overlayView;
+    private PreviewView previewView;
+    private android.widget.TextView overlayStatus;
     
-    // Motion Tracking Variables
-    private float lastHandY = -1f;
-    private long lastSwipeTime = 0;
-    private long lastFistTime = 0;
-    private static final long COOLDOWN_MS = 1200; 
+    private long lastActionTime = 0;
+    private static final long COOLDOWN_MS = 1500; // 1.5 sec cooldown
 
     @Override
     public void onCreate() {
@@ -43,17 +49,48 @@ public class GestureService extends LifecycleService {
         createNotificationChannel();
         startForeground(1, buildNotification());
 
-        BaseOptions baseOptions = BaseOptions.builder().setModelAssetPath("hand_landmarker.task").build();
-        HandLandmarker.HandLandmarkerOptions options = HandLandmarker.HandLandmarkerOptions.builder()
+        // Setup Floating Camera Window
+        setupFloatingWindow();
+
+        // Setup MediaPipe Gesture Recognizer
+        BaseOptions baseOptions = BaseOptions.builder().setModelAssetPath("gesture_recognizer.task").build();
+        GestureRecognizer.GestureRecognizerOptions options = GestureRecognizer.GestureRecognizerOptions.builder()
                 .setBaseOptions(baseOptions)
                 .setRunningMode(RunningMode.LIVE_STREAM)
                 .setNumHands(1)
-                .setResultListener(this::onHandResult)
+                .setResultListener(this::onGestureResult)
                 .build();
-        handLandmarker = HandLandmarker.createFromOptions(this, options);
+        gestureRecognizer = GestureRecognizer.createFromOptions(this, options);
 
         cameraExecutor = Executors.newSingleThreadExecutor();
         startCamera();
+    }
+
+    private void setupFloatingWindow() {
+        windowManager = (WindowManager) getSystemService(Context.WINDOW_SERVICE);
+        overlayView = LayoutInflater.from(this).inflate(R.layout.overlay_camera, null);
+        previewView = overlayView.findViewById(R.id.overlayPreview);
+        overlayStatus = overlayView.findViewById(R.id.overlayStatus);
+
+        int layoutFlag;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            layoutFlag = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY;
+        } else {
+            layoutFlag = WindowManager.LayoutParams.TYPE_PHONE;
+        }
+
+        WindowManager.LayoutParams params = new WindowManager.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                layoutFlag,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                PixelFormat.TRANSLUCENT
+        );
+        params.gravity = Gravity.TOP | Gravity.START;
+        params.x = 20; // Margin from left
+        params.y = 100; // Margin from top
+
+        windowManager.addView(overlayView, params);
     }
 
     private void startCamera() {
@@ -61,22 +98,26 @@ public class GestureService extends LifecycleService {
         cameraProviderFuture.addListener(() -> {
             try {
                 ProcessCameraProvider cameraProvider = cameraProviderFuture.get();
+                
+                Preview preview = new Preview.Builder().build();
+                preview.setSurfaceProvider(previewView.getSurfaceProvider());
+
                 ImageAnalysis imageAnalysis = new ImageAnalysis.Builder()
                         .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                         .build();
 
                 imageAnalysis.setAnalyzer(cameraExecutor, imageProxy -> {
-                    if (handLandmarker != null) {
+                    if (gestureRecognizer != null) {
                         android.graphics.Bitmap bitmap = imageProxy.toBitmap();
                         MPImage mpImage = new BitmapImageBuilder(bitmap).build();
-                        handLandmarker.detectAsync(mpImage, imageProxy.getImageInfo().getTimestamp());
+                        gestureRecognizer.recognizeAsync(mpImage, imageProxy.getImageInfo().getTimestamp());
                     }
                     imageProxy.close();
                 });
 
                 CameraSelector cameraSelector = CameraSelector.DEFAULT_FRONT_CAMERA;
                 cameraProvider.unbindAll();
-                cameraProvider.bindToLifecycle(this, cameraSelector, imageAnalysis);
+                cameraProvider.bindToLifecycle(this, cameraSelector, preview, imageAnalysis);
 
             } catch (Exception e) {
                 e.printStackTrace();
@@ -84,85 +125,54 @@ public class GestureService extends LifecycleService {
         }, ContextCompat.getMainExecutor(this));
     }
 
-    private void onHandResult(HandLandmarkerResult result, MPImage input) {
-        // Broadcast Live Status to MainActivity
-        Intent statusIntent = new Intent(ACTION_STATUS);
-        
-        if (result.landmarks().isEmpty()) {
-            lastHandY = -1f;
-            statusIntent.putExtra("hand_detected", false);
-            sendBroadcast(statusIntent);
-            return;
-        }
+    private void onGestureResult(GestureRecognizerResult result, MPImage input) {
+        runOnUiThread(() -> {
+            if (result.gestures().isEmpty()) {
+                overlayStatus.setText("Show Hand");
+                return;
+            }
 
-        statusIntent.putExtra("hand_detected", true);
-        sendBroadcast(statusIntent);
+            // Get the top recognized gesture
+            String gestureName = result.gestures().get(0).get(0).categoryName();
+            long currentTime = System.currentTimeMillis();
 
-        List<NormalizedLandmark> landmarks = result.landmarks().get(0);
-        
-        // 1. Fist Detection (Mutthi)
-        boolean isFist = checkFist(landmarks);
-        long currentTime = System.currentTimeMillis();
+            if (currentTime - lastActionTime < COOLDOWN_MS) return; // Prevent spamming
 
-        if (isFist) {
-            if (currentTime - lastFistTime > COOLDOWN_MS) {
-                SwipeAccessibilityService service = SwipeAccessibilityService.getInstance();
-                if (service != null) {
+            SwipeAccessibilityService service = SwipeAccessibilityService.getInstance();
+            if (service == null) {
+                overlayStatus.setText("Accessibility OFF");
+                return;
+            }
+
+            switch (gestureName) {
+                case "Pointing_Up":
+                    overlayStatus.setText("Scroll Up! ☝️");
+                    service.performSwipe(true);
+                    lastActionTime = currentTime;
+                    break;
+                case "Thumb_Down":
+                    overlayStatus.setText("Scroll Down! 👎");
+                    service.performSwipe(false);
+                    lastActionTime = currentTime;
+                    break;
+                case "Closed_Fist":
+                    overlayStatus.setText("Play/Pause ✊");
                     service.performPlayPause();
-                    lastFistTime = currentTime;
-                }
+                    lastActionTime = currentTime;
+                    break;
+                case "Open_Palm":
+                    overlayStatus.setText("Hand Open ✋");
+                    break;
+                default:
+                    overlayStatus.setText("Gesture: " + gestureName);
+                    break;
             }
-            lastHandY = -1f; // Reset swipe tracking
-            return;
-        }
-
-        // 2. Wave Detection (Track Wrist Y position)
-        // Landmark 0 is the Wrist
-        float currentHandY = landmarks.get(0).y(); 
-
-        if (lastHandY != -1f) {
-            float deltaY = lastHandY - currentHandY; // Positive = Moved UP, Negative = Moved DOWN
-
-            if (currentTime - lastSwipeTime > COOLDOWN_MS) {
-                if (deltaY > 0.15f) { // Moved UP rapidly
-                    SwipeAccessibilityService service = SwipeAccessibilityService.getInstance();
-                    if (service != null) {
-                        service.performSwipe(true); // Swipe Up
-                        lastSwipeTime = currentTime;
-                    }
-                } else if (deltaY < -0.15f) { // Moved DOWN rapidly
-                    SwipeAccessibilityService service = SwipeAccessibilityService.getInstance();
-                    if (service != null) {
-                        service.performSwipe(false); // Swipe Down
-                        lastSwipeTime = currentTime;
-                    }
-                }
-            }
-        }
-        
-        // Smooth tracking
-        lastHandY = currentHandY;
-    }
-
-    // Math to check if hand is closed in a fist
-    private boolean checkFist(List<NormalizedLandmark> landmarks) {
-        // Wrist (0), Index Tip (8), Middle Tip (12), Ring Tip (16), Pinky Tip (20)
-        // If fingertips are closer to wrist than the middle joints, it's a fist.
-        
-        float wristY = landmarks.get(0).y();
-        
-        // Check Y coordinates (Y goes down in Android, so Tip Y > Joint Y means folded)
-        boolean indexFolded = landmarks.get(8).y() > landmarks.get(6).y();
-        boolean middleFolded = landmarks.get(12).y() > landmarks.get(10).y();
-        boolean ringFolded = landmarks.get(16).y() > landmarks.get(14).y();
-        boolean pinkyFolded = landmarks.get(20).y() > landmarks.get(18).y();
-
-        return indexFolded && middleFolded && ringFolded && pinkyFolded;
+        });
     }
 
     private void createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            NotificationChannel channel = new NotificationChannel("gesture_channel", "Air Gesture Service", NotificationManager.IMPORTANCE_LOW);
+            NotificationChannel channel = new NotificationChannel("gesture_channel", "Air Gesture", NotificationManager.IMPORTANCE_LOW);
             NotificationManager manager = getSystemService(NotificationManager.class);
             if (manager != null) manager.createNotificationChannel(channel);
         }
@@ -171,17 +181,17 @@ public class GestureService extends LifecycleService {
     private Notification buildNotification() {
         return new NotificationCompat.Builder(this, "gesture_channel")
                 .setContentTitle("Air Gesture Active")
-                .setContentText("Camera is monitoring for gestures.")
+                .setContentText("Floating camera is running.")
                 .setSmallIcon(android.R.drawable.ic_menu_camera)
-                .setOngoing(true)
                 .build();
     }
 
     @Override
     public void onDestroy() {
         super.onDestroy();
-        if (handLandmarker != null) handLandmarker.close();
+        if (gestureRecognizer != null) gestureRecognizer.close();
         if (cameraExecutor != null) cameraExecutor.shutdown();
+        if (windowManager != null && overlayView != null) windowManager.removeView(overlayView);
     }
 
     @Override
