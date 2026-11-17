@@ -3,7 +3,9 @@ package com.amit.airgesture;
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.GestureDescription;
 import android.graphics.Path;
+import android.media.AudioManager;
 import android.util.DisplayMetrics;
+import android.view.KeyEvent;
 import android.view.accessibility.AccessibilityEvent;
 
 public class SwipeAccessibilityService extends AccessibilityService {
@@ -41,5 +43,16 @@ public class SwipeAccessibilityService extends AccessibilityService {
         GestureDescription.Builder gestureBuilder = new GestureDescription.Builder();
         gestureBuilder.addStroke(new GestureDescription.StrokeDescription(swipePath, 0, 300));
         dispatchGesture(gestureBuilder.build(), null, null);
+    }
+
+    // 🔥 Play/Pause Media Control 🔥
+    public void performPlayPause() {
+        AudioManager audioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
+        if (audioManager != null) {
+            KeyEvent downEvent = new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE);
+            audioManager.dispatchMediaKeyEvent(downEvent);
+            KeyEvent upEvent = new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE);
+            audioManager.dispatchMediaKeyEvent(upEvent);
+        }
     }
 }
