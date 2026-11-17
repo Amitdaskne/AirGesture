@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:gravity="center"
+    android:padding="32dp" android:background="@color/bg_dark">
+
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:text="AIR CONTROL" android:textSize="32sp" android:textColor="@color/neon_cyan"
+        android:textStyle="bold" android:fontFamily="monospace" android:letterSpacing="0.2"/>
+
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:text="Swipe 2 fingers UP or DOWN in front of camera to scroll any app."
+        android:textColor="@color/text_white" android:gravity="center"
+        android:layout_marginTop="16dp" android:layout_marginBottom="48dp" android:alpha="0.7"/>
+
+    <Button android:id="@+id/btnAccessibility" android:layout_width="match_parent"
+        android:layout_height="55dp" android:text="1. GRANT ACCESSIBILITY" android:textColor="@color/bg_dark"
+        android:background="@drawable/bg_button" android:layout_marginBottom="16dp"/>
+
+    <Button android:id="@+id/btnStart" android:layout_width="match_parent"
+        android:layout_height="55dp" android:text="2. START AIR GESTURE" android:textColor="@color/bg_dark"
+        android:background="@drawable/bg_button" android:layout_marginBottom="24dp"/>
+
+    <Button android:id="@+id/btnStop" android:layout_width="match_parent"
+        android:layout_height="55dp" android:text="STOP SERVICE" android:textColor="@color/neon_pink"
+        android:backgroundTint="#22000000" android:visibility="gone"/>
+
+    <TextView android:id="@+id/tvStatus" android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:text="Status: Idle" android:textColor="@color/neon_pink" android:layout_marginTop="32dp"/>
+</LinearLayout>
