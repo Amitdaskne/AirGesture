@@ -10,19 +10,19 @@ import androidx.annotation.NonNull;
 import androidx.camera.core.CameraSelector;
 import androidx.camera.core.ImageAnalysis;
 import androidx.camera.core.ImageProxy;
-import androidx.camera.core.Preview;
 import androidx.camera.lifecycle.ProcessCameraProvider;
-import androidx.camera.view.PreviewView;
 import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
 import androidx.lifecycle.LifecycleService;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.mediapipe.framework.image.BitmapImageBuilder;
 import com.google.mediapipe.framework.image.MPImage;
+import com.google.mediapipe.tasks.components.containers.NormalizedLandmark;
 import com.google.mediapipe.tasks.core.BaseOptions;
 import com.google.mediapipe.tasks.vision.core.RunningMode;
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker;
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarkerResult;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -64,7 +64,7 @@ public class GestureService extends LifecycleService {
 
                 imageAnalysis.setAnalyzer(cameraExecutor, imageProxy -> {
                     if (handLandmarker != null) {
-                        // Convert ImageProxy to Bitmap for MediaPipe
+                        // ImageProxy to Bitmap conversion
                         android.graphics.Bitmap bitmap = imageProxy.toBitmap();
                         MPImage mpImage = new BitmapImageBuilder(bitmap).build();
                         handLandmarker.detectAsync(mpImage, imageProxy.getImageInfo().getTimestamp());
@@ -74,6 +74,7 @@ public class GestureService extends LifecycleService {
 
                 CameraSelector cameraSelector = CameraSelector.DEFAULT_FRONT_CAMERA;
                 cameraProvider.unbindAll();
+                // Bind to Lifecycle (Because we extend LifecycleService, 'this' is a LifecycleOwner)
                 cameraProvider.bindToLifecycle(this, cameraSelector, imageAnalysis);
 
             } catch (Exception e) {
@@ -85,28 +86,26 @@ public class GestureService extends LifecycleService {
     private void onHandResult(HandLandmarkerResult result, MPImage input) {
         if (result.landmarks().isEmpty()) return;
 
-        var landmarks = result.landmarks().get(0);
+        // 🔥 FIX: 'var' ko List<NormalizedLandmark> me change kiya 🔥
+        List<NormalizedLandmark> landmarks = result.landmarks().get(0);
+        
         // Index Finger Tip (8) and Middle Finger Tip (12)
         float indexY = landmarks.get(8).y();
         float middleY = landmarks.get(12).y();
-        float avgY = (indexY + middleY) / 2;
 
-        // We need to track movement, but for a simple approach, we detect if both fingers are pointing and moving.
-        // For this demo, let's use a simpler heuristic: we trigger based on hand position relative to center.
-        // A true swipe requires tracking over multiple frames. Here we use a basic "Upper/Lower" zone detection for demo.
-        
         long currentTime = System.currentTimeMillis();
         if (currentTime - lastSwipeTime < SWIPE_COOLDOWN_MS) return;
 
-        // If 2 fingers are extended (Index 8 and Middle 12) and they are in the top 30% of the screen
-        // We simulate a "Swipe Up". If in bottom 30%, "Swipe Down".
+        // Agar 2 ungliyan screen ke top 30% area me hain, toh Swipe Up
         if (indexY < 0.3f && middleY < 0.3f) {
             SwipeAccessibilityService service = SwipeAccessibilityService.getInstance();
             if (service != null) {
                 service.performSwipe(true); // Swipe Up
                 lastSwipeTime = currentTime;
             }
-        } else if (indexY > 0.7f && middleY > 0.7f) {
+        } 
+        // Agar niche 30% area me hain, toh Swipe Down
+        else if (indexY > 0.7f && middleY > 0.7f) {
             SwipeAccessibilityService service = SwipeAccessibilityService.getInstance();
             if (service != null) {
                 service.performSwipe(false); // Swipe Down
@@ -116,8 +115,11 @@ public class GestureService extends LifecycleService {
     }
 
     private void createNotificationChannel() {
-        NotificationChannel channel = new NotificationChannel("gesture_channel", "Air Gesture Service", NotificationManager.IMPORTANCE_LOW);
-        getSystemService(NotificationManager.class).createNotificationChannel(channel);
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            NotificationChannel channel = new NotificationChannel("gesture_channel", "Air Gesture Service", NotificationManager.IMPORTANCE_LOW);
+            NotificationManager manager = getSystemService(NotificationManager.class);
+            if (manager != null) manager.createNotificationChannel(channel);
+        }
     }
 
     private Notification buildNotification() {
