@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Air Gesture</string>
+    <string name="accessibility_desc">Required to perform swipe gestures for Air Control.</string>
+</resources>

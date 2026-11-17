@@ -5,4 +5,4 @@
     android:notificationTimeout="100"
     android:canRetrieveWindowContent="true"
     android:canPerformGestures="true" 
-    android:description="Required to perform swipe gestures for Air Control."/>
+    android:description="@string/accessibility_desc" />
